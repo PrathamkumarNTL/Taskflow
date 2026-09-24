@@ -1,6 +1,8 @@
+using TaskFlow.Api.Data;
 using TaskFlow.Api.Exceptions;
 using TaskFlow.Application;
 using TaskFlow.Infrastructure;
+using TaskFlow.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +20,15 @@ builder.Services.AddSwaggerGen();
 
 
 var app = builder.Build();
+
+if(app.Environment.IsDevelopment())
+{
+    using var scope = app.Services.CreateScope();
+
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    await DevelopmentDataSeeder.SeedAsync(dbContext);
+}
 
 app.UseExceptionHandler();
 
