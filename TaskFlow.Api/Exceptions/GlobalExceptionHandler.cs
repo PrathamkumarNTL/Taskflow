@@ -1,31 +1,65 @@
-﻿using Microsoft.AspNetCore.Diagnostics;
+﻿
+using FluentValidation;
+using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace TaskFlow.Api.Exceptions;
 
-public class GlobalExceptionHandler(IProblemDetailsService problemDetailsService) : IExceptionHandler
+public sealed class GlobalExceptionHandler : IExceptionHandler
 {
-    public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext context,
+        Exception ex,
+        CancellationToken ct)
     {
-        var statusCode = exception switch
+        var status = ex switch
         {
-            KeyNotFoundException => StatusCodes.Status404NotFound, _ => StatusCodes.Status500InternalServerError
+            ValidationException =>
+                StatusCodes.Status400BadRequest,
+
+            KeyNotFoundException =>
+                StatusCodes.Status404NotFound,
+
+            UnauthorizedAccessException =>
+                StatusCodes.Status403Forbidden,
+
+            DbUpdateConcurrencyException =>
+                StatusCodes.Status409Conflict,
+
+            _ => StatusCodes.Status500InternalServerError
         };
 
-        httpContext.Response.StatusCode = statusCode;
+        context.Response.StatusCode = status;
+        context.Response.ContentType = "application/problem+json";
 
-        var problemDetails = new ProblemDetails
+        var problem = new ProblemDetails
         {
-            Status = statusCode,
-            Title = statusCode == StatusCodes.Status404NotFound ? "Resource Not Found" : "An unexpected error occurred.",
-            Detail = statusCode == StatusCodes.Status500InternalServerError ? "An unexpected error occurred." : exception.Message
-        };
-
-        return await problemDetailsService.TryWriteAsync(
-            new ProblemDetailsContext
+            Status = status,
+            Title = status switch
             {
-                HttpContext = httpContext,
-                ProblemDetails = problemDetails
-            });
+                400 => "Validation failed",
+                404 => "Resource not found",
+                403 => "Forbidden",
+                409 => "Concurrency conflict",
+                _ => "Unexpected server error"
+            },
+            Detail = status == 500 ? null : ex.Message,
+            Instance = context.Request.Path
+        };
+
+        if (ex is ValidationException validation)
+        {
+            problem.Extensions["errors"] = validation.Errors
+                .GroupBy(e => e.PropertyName)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(e => e.ErrorMessage).ToArray());
+        }
+
+        await System.Text.Json.JsonSerializer.SerializeAsync(context.Response.Body,problem,cancellationToken: ct);
+
+        return true;
     }
 }

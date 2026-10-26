@@ -20,15 +20,14 @@ public class CreateTaskHandler(IAppDbContext db) : IRequestHandler<CreateTaskCom
                 p => p.Id == request.ProjectId,
                 cancellationToken);
 
-        if (!projectExists)
-        {
-            throw new KeyNotFoundException(
-                "Project was not found.");
-        }
+
+        var project = await db.Projects.SingleOrDefaultAsync(p => p.Id == request.ProjectId,cancellationToken) ?? throw new KeyNotFoundException("Project was not found.");
+
 
         var task = new TaskItem
         {
-            ProjectId = request.ProjectId,
+            ProjectId = project.Id,
+            TenantId = project.TenantId,
             Title = request.Title
         };
 
